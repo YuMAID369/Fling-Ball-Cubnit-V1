@@ -9,137 +9,131 @@ local character = lp.Character or lp.CharacterAdded:Wait()
 
 -- 1. CRIAÇÃO DA TOOL DE CONTROLE (INVISÍVEL E SEM ANIMAÇÃO)
 local tool = Instance.new("Tool")
-tool.Name = " GHOST 999999 "
-tool.RequiresHandle = false -- Remove a necessidade de um bloco físico (Handle)
+tool.Name = " FLING BALL "
+tool.RequiresHandle = false
 tool.Parent = lp:WaitForChild("Backpack")
 
--- Função para impedir a animação de levantar o braço
-tool.Equipped:Connect(function()
-    local vCharacter = lp.Character
-    if vCharacter and vCharacter:FindFirstChild("Humanoid") then
-        -- Desativa a animação padrão de segurar ferramentas do braço direito
-        local anim = vCharacter.Humanoid:LoadAnimation(Instance.new("Animation"))
-        -- Sobrescrevemos o estado para manter o braço abaixado
-    end
-end)
+-- Suporte para detectar cliques em qualquer distância/visão
+local camera = Workspace.CurrentCamera
 
 -- 2. FUNÇÃO DE ATAQUE SINCRONIZADA EM 999999
 local function executarAtaqueLimitado(alvoPlayer)
-    local alvoChar = alvoPlayer.Character
-    if not alvoChar or not alvoChar:FindFirstChild("HumanoidRootPart") then return end
-    
-    local alvoHRP = alvoChar.HumanoidRootPart
-    local alvoHum = alvoChar.Humanoid
-    local vCharacter = lp.Character
-    
-    -- --- AUTOMAÇÃO DO LANÇAMENTO ---
-    -- Invoca a ferramenta da bola para a mochila
-    local remote = ReplicatedStorage:WaitForChild("RE"):WaitForChild("1Too1l")
-    remote:InvokeServer("PickingTools", "SoccerBall")
-    
-    -- Espera a ferramenta aparecer e força o uso automático
-    task.spawn(function()
-        local sTool = lp.Backpack:WaitForChild("SoccerBall", 5)
-        if sTool and vCharacter then
-            sTool.Parent = vCharacter -- Equipa automaticamente
-            task.wait(0.05)
-            sTool:Activate() -- Simula o clique/arremesso no chão automaticamente
-            task.wait(0.05)
-            sTool.Parent = lp.Backpack -- Remove da mão para liberar a física
-        end
-    end)
-    
-    -- Localiza a bola física no mapa (Soccer + Nome)
-    local ballName = "Soccer" .. lp.Name
-    local ballFolder = Workspace:WaitForChild("WorkspaceCom"):WaitForChild("001_SoccerBalls")
-    local bolaFisica = nil
-    
-    for i = 1, 50 do
-        bolaFisica = ballFolder:FindFirstChild(ballName)
-        if bolaFisica then break end
-        task.wait(0.1)
-    end
-    
-    if bolaFisica then
-        -- NoCollision para você não ser afetado pela própria bola
-        local nc = Instance.new("NoCollisionConstraint", bolaFisica)
-        nc.Part0 = bolaFisica
-        nc.Part1 = vCharacter:FindFirstChild("HumanoidRootPart") or vCharacter:FindFirstChild("Head")
+	local alvoChar = alvoPlayer.Character
+	if not alvoChar or not alvoChar:FindFirstChild("HumanoidRootPart") then return end
+	
+	local alvoHRP = alvoChar.HumanoidRootPart
+	local alvoHum = alvoChar.Humanoid
+	local vCharacter = lp.Character
 
-        bolaFisica.CanCollide = true
-        bolaFisica.Massless = false
-        bolaFisica.CustomPhysicalProperties = PhysicalProperties.new(100, 100, 0, 100, 100)
-        
-        -- FORÇA DE FLING (LIMITADA EM 999999)
-        local velocity = Instance.new("BodyVelocity")
-        velocity.Name = "FlingPower"
-        velocity.Velocity = Vector3.new(99999, 99999, 99999)
-        velocity.MaxForce = Vector3.new(99999, 99999, 99999)
-        velocity.P = 999999
-        velocity.Parent = bolaFisica
+	-- --- AUTOMAÇÃO DO LANÇAMENTO ---
+	local remote = ReplicatedStorage:WaitForChild("RE"):WaitForChild("1Too1l")  
 
-        -- Partes principais para o impacto
-        local partesAlvo = {"Head", "UpperTorso", "LowerTorso"}
-        
-        task.spawn(function()
-            local index = 1
-            while bolaFisica and bolaFisica.Parent and alvoHum.Health > 0 do
-                local nomeParte = partesAlvo[index]
-                local p = alvoChar:FindFirstChild(nomeParte)
-                
-                if p then
-                    -- Movimentação com predição de movimento
-                    bolaFisica.CFrame = CFrame.new(p.Position + (p.Velocity / 1.5))
-                    
-                    -- Sincronia de Velocidade para os outros jogadores verem
-                    bolaFisica.Velocity = Vector3.new(999999, 999999, 999999)
-                    bolaFisica.RotVelocity = Vector3.new(99999, 99999, 99999)
-                end
-                
-                task.wait(0.03) -- Frequência ideal para replicação do servidor
-                
-                index = index + 1
-                if index > #partesAlvo then index = 1 end
-            end
-            if bolaFisica then bolaFisica:Destroy() end
-        end)
-    end
+	if not lp.Backpack:FindFirstChild("SoccerBall") and not character:FindFirstChild("SoccerBall") then
+		remote:InvokeServer("PickingTools", "SoccerBall")
+	end  
+
+	repeat task.wait() until lp.Backpack:FindFirstChild("SoccerBall") or character:FindFirstChild("SoccerBall")  
+
+	local sTool = lp.Backpack:FindFirstChild("SoccerBall") or character:FindFirstChild("SoccerBall")
+	sTool.Parent = character  
+
+	local ballName = "Soccer" .. lp.Name
+	local ballFolder = Workspace:WaitForChild("WorkspaceCom"):WaitForChild("001_SoccerBalls")
+
+	local bolaFisica = nil
+
+	repeat task.wait() until ballFolder:FindFirstChild(ballName)
+	bolaFisica = ballFolder:FindFirstChild(ballName)  
+
+	sTool.Parent = lp.Backpack  
+
+	if bolaFisica then
+		local nc = Instance.new("NoCollisionConstraint", bolaFisica)
+		nc.Part0 = bolaFisica
+		nc.Part1 = vCharacter:FindFirstChild("HumanoidRootPart") or vCharacter:FindFirstChild("Head")
+
+		bolaFisica.CanCollide = true
+		bolaFisica.Massless = false
+
+		-- Friction ajustado para 2 (máximo permitido)
+		bolaFisica.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0, 100, 100)
+
+		local velocity = Instance.new("BodyVelocity")
+		velocity.Name = "FlingPower"
+		velocity.Velocity = Vector3.new(99999, 99999, 99999)
+		velocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+		velocity.P = 999999
+		velocity.Parent = bolaFisica  
+
+		local partesAlvo = {"Head", "UpperTorso", "LowerTorso"}
+
+		task.spawn(function()
+			local index = 1
+			while bolaFisica and bolaFisica.Parent and alvoHum.Health > 0 do
+				local nomeParte = partesAlvo[index]
+				local p = alvoChar:FindFirstChild(nomeParte)
+
+				if p then
+					bolaFisica.CFrame = CFrame.new(p.Position + (p.Velocity / 1.5))  
+
+					bolaFisica.Velocity = Vector3.new(999999, 999999, 999999)
+					bolaFisica.RotVelocity = Vector3.new(99999, 99999, 99999)
+					bolaFisica.Orientation += Vector3.new(45, 60, 30)
+				end  
+
+				task.wait(1/6000)
+
+				index = index + 1
+				if index > #partesAlvo then index = 1 end
+			end
+
+			if bolaFisica then
+				bolaFisica:Destroy()
+			end
+		end)
+	end
 end
 
--- 3. CONEXÃO DE CLIQUE COM ALCANCE INFINITO
--- Usamos o Mouse do player diretamente para ignorar limites de distância do Tool
+-- 3. CONEXÃO DE CLIQUE COM ALCANCE INFINITO (ADAPTADO PARA VIEW)
 local mouse = lp:GetMouse()
 
 tool.Activated:Connect(function()
-    local target = mouse.Target
-    if target and target.Parent then
-        local model = target.Parent
-        -- Verifica se o clique foi em um jogador (procurando o Humanoid)
-        if not model:FindFirstChild("Humanoid") then 
-            model = model.Parent 
-        end
-        
-        local tPlayer = Players:GetPlayerFromCharacter(model)
-        if tPlayer and tPlayer ~= lp then
-            executarAtaqueLimitado(tPlayer)
-        end
-    end
+	-- Técnica de Raycast para ignorar a distância do personagem real
+	-- Ele pega a posição do mouse na tela e projeta um raio a partir da câmera atual (mesmo em VIEW)
+	local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	raycastParams.FilterDescendantsInstances = {character} -- Ignora você mesmo
+	
+	-- Raio com alcance de 50.000 studs (Infinito na prática)
+	local raycastResult = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 50000, raycastParams)
+
+	if raycastResult and raycastResult.Instance then
+		local hitPart = raycastResult.Instance
+		local model = hitPart:FindFirstAncestorOfClass("Model")
+		
+		if model and model:FindFirstChild("Humanoid") then
+			local tPlayer = Players:GetPlayerFromCharacter(model)
+			
+			if tPlayer and tPlayer ~= lp then
+				executarAtaqueLimitado(tPlayer)
+			end
+		end
+	end
 end)
 
--- Limpeza extra: Impede que o braço levante ao clicar
+-- LIMPEZA EXTRA: braço não levantar
 RunService.RenderStepped:Connect(function()
-    if tool.Parent == character then
-        -- Força o braço a ignorar a pose de 'ToolNone' ou 'ToolSlash'
-        local rArm = character:FindFirstChild("Right Upper Arm") or character:FindFirstChild("RightArm")
-        if rArm then
-            -- Ajuste opcional de CFrame se quiser o braço em uma posição específica, 
-            -- mas o 'RequiresHandle = false' já resolve a maioria das animações.
-        end
-    end
+	if tool.Parent == character then
+		local rArm = character:FindFirstChild("Right Upper Arm") or character:FindFirstChild("RightArm")
+		if rArm then
+			-- Mantido sem interferência
+		end
+	end
 end)
 
-print(" SCRIPT ATUALIZADO COMPLETO:")
-print("- Alcance Infinito Ativado")
-print("- Tool Invisível (Sem Handle)")
-print("- Animação de Braço Removida")
-print("- Lançamento Automático da Bola Configurado")
+print(" SCRIPT ATUALIZADO (MODO VIEW):")
+print("- Suporte a Visão de Terceiros (VIEW SCRIPT) Ativado")
+print("- Alcance de Clique: 50.000 studs")
+print("- Detecção de Alvo por Screen-Raycast")
+print("- Física de Impacto 1/6000 Mantida")
