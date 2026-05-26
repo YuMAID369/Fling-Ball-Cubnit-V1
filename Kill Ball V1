@@ -1,4 +1,4 @@
--- SERVIÇOS
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -7,16 +7,29 @@ local RunService = game:GetService("RunService")
 local lp = Players.LocalPlayer
 local character = lp.Character or lp.CharacterAdded:Wait()
 
+-- CHAVE DO NETWORK OWNERSHIP
+local sethp = sethiddenproperty or set_hidden_property
+if sethp then
+    task.spawn(function()
+        RunService.RenderStepped:Connect(function()
+            pcall(function()
+                -- Expande o raio atual e força o limite máximo do motor a aceitar a distância
+                sethp(lp, "SimulationRadius", 1e30)
+                sethp(lp, "MaxSimulationRadius", 1e30)
+            end)
+        end)
+    end)
+end
+
 -- 1. CRIAÇÃO DA TOOL DE CONTROLE (INVISÍVEL E SEM ANIMAÇÃO)
 local tool = Instance.new("Tool")
-tool.Name = " FLING BALL "
+tool.Name = "BALL FLING"
 tool.RequiresHandle = false
 tool.Parent = lp:WaitForChild("Backpack")
 
--- Suporte para detectar cliques em qualquer distância/visão
 local camera = Workspace.CurrentCamera
 
--- 2. FUNÇÃO DE ATAQUE SINCRONIZADA EM 999999
+-- 2. FUNÇÃO DE ATAQUE REFORÇADA COM MAX NETWORK REPLICATION
 local function executarAtaqueLimitado(alvoPlayer)
 	local alvoChar = alvoPlayer.Character
 	if not alvoChar or not alvoChar:FindFirstChild("HumanoidRootPart") then return end
@@ -24,6 +37,7 @@ local function executarAtaqueLimitado(alvoPlayer)
 	local alvoHRP = alvoChar.HumanoidRootPart
 	local alvoHum = alvoChar.Humanoid
 	local vCharacter = lp.Character
+	local meuHRP = vCharacter:FindFirstChild("HumanoidRootPart")
 
 	-- --- AUTOMAÇÃO DO LANÇAMENTO ---
 	local remote = ReplicatedStorage:WaitForChild("RE"):WaitForChild("1Too1l")  
@@ -41,71 +55,96 @@ local function executarAtaqueLimitado(alvoPlayer)
 	local ballFolder = Workspace:WaitForChild("WorkspaceCom"):WaitForChild("001_SoccerBalls")
 
 	local bolaFisica = nil
-
 	repeat task.wait() until ballFolder:FindFirstChild(ballName)
 	bolaFisica = ballFolder:FindFirstChild(ballName)  
 
 	sTool.Parent = lp.Backpack  
 
-	if bolaFisica then
+	if bolaFisica and meuHRP then
+		-- Forçar a posse de rede diretamente no ID da instância física
+		if sethp then
+			pcall(function() sethp(bolaFisica, "NetworkOwner", lp) end)
+		elseif bolaFisica.SetNetworkOwner then
+			pcall(function() bolaFisica:SetNetworkOwner(lp) end)
+		end
+
+		-- Desativar colisão local para não afetar você
 		local nc = Instance.new("NoCollisionConstraint", bolaFisica)
 		nc.Part0 = bolaFisica
-		nc.Part1 = vCharacter:FindFirstChild("HumanoidRootPart") or vCharacter:FindFirstChild("Head")
+		nc.Part1 = meuHRP
 
 		bolaFisica.CanCollide = true
 		bolaFisica.Massless = false
+		
+		-- Limpeza de forças residuais do servidor antes do disparo local
+		bolaFisica.Velocity = Vector3.new(0,0,0)
+		bolaFisica.RotVelocity = Vector3.new(0,0,0)
+		bolaFisica.CustomPhysicalProperties = PhysicalProperties.new(100, 100, 0, 100, 100)
 
-		-- Friction ajustado para 2 (máximo permitido)
-		bolaFisica.CustomPhysicalProperties = PhysicalProperties.new(100, 2, 0, 100, 100)
+		-- Força Multiplicada no limite estourado da engine (Garante o Fling instantâneo)
+		local forcaMassiva = Vector3.new(math.huge * math.huge, math.huge * math.huge, math.huge * math.huge)
 
 		local velocity = Instance.new("BodyVelocity")
-		velocity.Name = "FlingPower"
-		velocity.Velocity = Vector3.new(99999, 99999, 99999)
-		velocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-		velocity.P = 999999
+		velocity.Name = "FlingPowerLinear"
+		velocity.Velocity = Vector3.new(999999, 999999, 999999)
+		velocity.MaxForce = forcaMassiva
+		velocity.P = math.huge
 		velocity.Parent = bolaFisica  
 
-		local partesAlvo = {"Head", "UpperTorso", "LowerTorso"}
+		local angularVelocity = Instance.new("BodyAngularVelocity")
+		angularVelocity.Name = "FlingPowerAngular"
+		angularVelocity.AngularVelocity = Vector3.new(999999, 999999, 999999)
+		angularVelocity.MaxTorque = forcaMassiva
+		angularVelocity.P = math.huge
+		angularVelocity.Parent = bolaFisica
+
+		local partesAlvo = {"HumanoidRootPart", "Head", "LowerTorso"}
 
 		task.spawn(function()
 			local index = 1
-			while bolaFisica and bolaFisica.Parent and alvoHum.Health > 0 do
+			local conexaoFisica
+			
+			conexaoFisica = RunService.Heartbeat:Connect(function()
+				if not bolaFisica or not bolaFisica.Parent or alvoHum.Health <= 0 or not alvoChar.Parent then
+					if conexaoFisica then conexaoFisica:Disconnect() end
+					if bolaFisica then bolaFisica:Destroy() end
+					return
+				end
+
 				local nomeParte = partesAlvo[index]
 				local p = alvoChar:FindFirstChild(nomeParte)
 
 				if p then
-					bolaFisica.CFrame = CFrame.new(p.Position + (p.Velocity / 1.5))  
-
+					-- Ajuste cirúrgico: Mantém a bola colada milimetricamente à frente no ritmo exato do alvo
+					local offsetCurto = Vector3.new(0, 0, 0)
+					if p.Velocity.Magnitude > 0.1 then
+						offsetCurto = p.Velocity.Unit * 0.8
+					end
+					
+					-- Teleporte por CFrame sob a zona de autoridade do Ultra SimulationRadius
+					bolaFisica.CFrame = CFrame.new(p.Position + offsetCurto)
+					
+					-- Alimentação constante de vetores massivos para impedir perda de dados na rede
 					bolaFisica.Velocity = Vector3.new(999999, 999999, 999999)
-					bolaFisica.RotVelocity = Vector3.new(99999, 99999, 99999)
-					bolaFisica.Orientation += Vector3.new(45, 60, 30)
-				end  
-
-				task.wait(1/6000)
+					bolaFisica.RotVelocity = Vector3.new(999999, 999999, 999999)
+				end
 
 				index = index + 1
 				if index > #partesAlvo then index = 1 end
-			end
-
-			if bolaFisica then
-				bolaFisica:Destroy()
-			end
+			end)
 		end)
 	end
 end
 
--- 3. CONEXÃO DE CLIQUE COM ALCANCE INFINITO (ADAPTADO PARA VIEW)
+-- 3. CONEXÃO DE RAYCAST POR TELA
 local mouse = lp:GetMouse()
 
 tool.Activated:Connect(function()
-	-- Técnica de Raycast para ignorar a distância do personagem real
-	-- Ele pega a posição do mouse na tela e projeta um raio a partir da câmera atual (mesmo em VIEW)
 	local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-	raycastParams.FilterDescendantsInstances = {character} -- Ignora você mesmo
+	raycastParams.FilterDescendantsInstances = {character}
 	
-	-- Raio com alcance de 50.000 studs (Infinito na prática)
 	local raycastResult = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 50000, raycastParams)
 
 	if raycastResult and raycastResult.Instance then
@@ -122,18 +161,12 @@ tool.Activated:Connect(function()
 	end
 end)
 
--- LIMPEZA EXTRA: braço não levantar
+-- Limpeza visual
 RunService.RenderStepped:Connect(function()
 	if tool.Parent == character then
 		local rArm = character:FindFirstChild("Right Upper Arm") or character:FindFirstChild("RightArm")
 		if rArm then
-			-- Mantido sem interferência
+			-- Travado
 		end
 	end
 end)
-
-print(" SCRIPT ATUALIZADO (MODO VIEW):")
-print("- Suporte a Visão de Terceiros (VIEW SCRIPT) Ativado")
-print("- Alcance de Clique: 50.000 studs")
-print("- Detecção de Alvo por Screen-Raycast")
-print("- Física de Impacto 1/6000 Mantida")
