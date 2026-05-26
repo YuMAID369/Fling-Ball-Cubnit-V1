@@ -170,3 +170,5 @@ RunService.RenderStepped:Connect(function()
 		end
 	end
 end)
+
+print("👑 ÁPICE ALCANÇADO: SimulationRadius e MaxSimulationRadius trancados no limite físico.")
