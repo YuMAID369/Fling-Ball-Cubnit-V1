@@ -1,18 +1,24 @@
+-- ============================================
+-- FLING BALL TOOL (COMPATÍVEL COM PROJECT BACKPACK)
+-- ============================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local lp = Players.LocalPlayer
 local character = lp.Character or lp.CharacterAdded:Wait()
 
--- CHAVE DO NETWORK OWNERSHIP
+lp.CharacterAdded:Connect(function(newChar)
+    character = newChar
+end)
+
 local sethp = sethiddenproperty or set_hidden_property
 if sethp then
     task.spawn(function()
         RunService.RenderStepped:Connect(function()
             pcall(function()
-                -- Expande o raio atual e força o limite máximo do motor a aceitar a distância
                 sethp(lp, "SimulationRadius", 1e30)
                 sethp(lp, "MaxSimulationRadius", 1e30)
             end)
@@ -20,153 +26,179 @@ if sethp then
     end)
 end
 
--- 1. CRIAÇÃO DA TOOL DE CONTROLE (INVISÍVEL E SEM ANIMAÇÃO)
-local tool = Instance.new("Tool")
-tool.Name = "BALL FLING"
-tool.RequiresHandle = false
-tool.Parent = lp:WaitForChild("Backpack")
-
 local camera = Workspace.CurrentCamera
 
--- 2. FUNÇÃO DE ATAQUE REFORÇADA COM MAX NETWORK REPLICATION
 local function executarAtaqueLimitado(alvoPlayer)
-        local alvoChar = alvoPlayer.Character
-        if not alvoChar or not alvoChar:FindFirstChild("HumanoidRootPart") then return end
+    local alvoChar = alvoPlayer.Character
+    if not alvoChar or not alvoChar:FindFirstChild("HumanoidRootPart") then return end
 
-        local alvoHRP = alvoChar.HumanoidRootPart
-        local alvoHum = alvoChar.Humanoid
-        local vCharacter = lp.Character
-        local meuHRP = vCharacter:FindFirstChild("HumanoidRootPart")
+    local alvoHum = alvoChar.Humanoid
+    local vCharacter = lp.Character
+    local meuHRP = vCharacter and vCharacter:FindFirstChild("HumanoidRootPart")
 
-        -- --- AUTOMAÇÃO DO LANÇAMENTO ---
-        local remote = ReplicatedStorage:WaitForChild("RE"):WaitForChild("1Too1l")  
+    local remote = ReplicatedStorage:WaitForChild("RE"):WaitForChild("1Too1l")  
 
-        if not lp.Backpack:FindFirstChild("SoccerBall") and not character:FindFirstChild("SoccerBall") then
-                remote:InvokeServer("PickingTools", "SoccerBall")
-        end  
+    if not lp.Backpack:FindFirstChild("SoccerBall") and not character:FindFirstChild("SoccerBall") then
+        remote:InvokeServer("PickingTools", "SoccerBall")
+    end  
 
-        repeat task.wait() until lp.Backpack:FindFirstChild("SoccerBall") or character:FindFirstChild("SoccerBall")  
+    repeat task.wait() until lp.Backpack:FindFirstChild("SoccerBall") or character:FindFirstChild("SoccerBall")  
 
-        local sTool = lp.Backpack:FindFirstChild("SoccerBall") or character:FindFirstChild("SoccerBall")
-        sTool.Parent = character  
+    local sTool = lp.Backpack:FindFirstChild("SoccerBall") or character:FindFirstChild("SoccerBall")
+    sTool.Parent = character  
 
-        local ballName = "Soccer" .. lp.Name
-        local ballFolder = Workspace:WaitForChild("WorkspaceCom"):WaitForChild("001_SoccerBalls")
+    local ballName = "Soccer" .. lp.Name
+    local ballFolder = Workspace:WaitForChild("WorkspaceCom"):WaitForChild("001_SoccerBalls")
 
-        local bolaFisica = nil
-        repeat task.wait() until ballFolder:FindFirstChild(ballName)
-        bolaFisica = ballFolder:FindFirstChild(ballName)  
+    local bolaFisica = nil
+    repeat task.wait() until ballFolder:FindFirstChild(ballName)
+    bolaFisica = ballFolder:FindFirstChild(ballName)  
 
-        sTool.Parent = lp.Backpack  
+    sTool.Parent = lp.Backpack  
 
-        if bolaFisica and meuHRP then
-                -- Forçar a posse de rede diretamente no ID da instância física
-                if sethp then
-                        pcall(function() sethp(bolaFisica, "NetworkOwner", lp) end)
-                elseif bolaFisica.SetNetworkOwner then
-                        pcall(function() bolaFisica:SetNetworkOwner(lp) end)
+    if bolaFisica and meuHRP then
+        if sethp then
+            pcall(function() sethp(bolaFisica, "NetworkOwner", lp) end)
+        elseif bolaFisica.SetNetworkOwner then
+            pcall(function() bolaFisica:SetNetworkOwner(lp) end)
+        end
+
+        local nc = Instance.new("NoCollisionConstraint", bolaFisica)
+        nc.Part0 = bolaFisica
+        nc.Part1 = meuHRP
+
+        bolaFisica.CanCollide = true
+        bolaFisica.Massless = false
+        bolaFisica.CustomPhysicalProperties = PhysicalProperties.new(100, 100, 10, 100, 100)
+
+        bolaFisica.Velocity = Vector3.new(0,0,0)
+        bolaFisica.RotVelocity = Vector3.new(0,0,0)
+
+        local forcaMassiva = Vector3.new(math.huge, math.huge, math.huge)
+
+        local velocity = Instance.new("BodyVelocity")
+        velocity.Name = "FlingPowerLinear"
+        velocity.Velocity = Vector3.new(999999, 999999, 999999)
+        velocity.MaxForce = forcaMassiva
+        velocity.P = math.huge
+        velocity.Parent = bolaFisica  
+
+        local angularVelocity = Instance.new("BodyAngularVelocity")
+        angularVelocity.Name = "FlingPowerAngular"
+        angularVelocity.AngularVelocity = Vector3.new(999999, 999999, 999999)
+        angularVelocity.MaxTorque = forcaMassiva
+        angularVelocity.P = math.huge
+        angularVelocity.Parent = bolaFisica
+
+        local partesAlvo = {"HumanoidRootPart", "Head", "LowerTorso"}
+
+        task.spawn(function()
+            local index = 1
+            local conexaoFisica
+
+            conexaoFisica = RunService.Heartbeat:Connect(function()
+                if not bolaFisica or not bolaFisica.Parent or alvoHum.Health <= 0 or not alvoChar.Parent then
+                    if conexaoFisica then conexaoFisica:Disconnect() end
+                    if bolaFisica then bolaFisica:Destroy() end
+                    return
                 end
 
-                -- Desativar colisão local para não afetar você
-                local nc = Instance.new("NoCollisionConstraint", bolaFisica)
-                nc.Part0 = bolaFisica
-                nc.Part1 = meuHRP
-
-                -- Configuração Física Extrema para Colisão Absoluta
                 bolaFisica.CanCollide = true
-                bolaFisica.Massless = false
-                -- Densidade máxima, Fricção máxima e Elasticidade máxima para transferir o impacto instantaneamente
-                bolaFisica.CustomPhysicalProperties = PhysicalProperties.new(100, 100, 10, 100, 100)
 
-                -- Limpeza de forças residuais do servidor antes do disparo local
-                bolaFisica.Velocity = Vector3.new(0,0,0)
-                bolaFisica.RotVelocity = Vector3.new(0,0,0)
+                local nomeParte = partesAlvo[index]
+                local p = alvoChar:FindFirstChild(nomeParte)
 
-                -- Força Multiplicada no limite estourado da engine (Garante o Fling instantâneo)
-                local forcaMassiva = Vector3.new(math.huge, math.huge, math.huge)
+                if p then
+                    local vReal = p.AssemblyLinearVelocity
+                    local velocidadePlana = Vector3.new(vReal.X, 0, vReal.Z)
+                    local posicaoFinal = p.Position
 
-                local velocity = Instance.new("BodyVelocity")
-                velocity.Name = "FlingPowerLinear"
-                velocity.Velocity = Vector3.new(999999, 999999, 999999)
-                velocity.MaxForce = forcaMassiva
-                velocity.P = math.huge
-                velocity.Parent = bolaFisica  
+                    if velocidadePlana.Magnitude > 1 then
+                        local direcaoMovimento = velocidadePlana.Unit
+                        local studsDeCompensacao = (velocidadePlana.Magnitude <= 18) and 14.2 or 20.2
+                        posicaoFinal = p.Position + (direcaoMovimento * studsDeCompensacao)
+                    end
 
-                local angularVelocity = Instance.new("BodyAngularVelocity")
-                angularVelocity.Name = "FlingPowerAngular"
-                angularVelocity.AngularVelocity = Vector3.new(999999, 999999, 999999)
-                angularVelocity.MaxTorque = forcaMassiva
-                angularVelocity.P = math.huge
-                angularVelocity.Parent = bolaFisica
+                    bolaFisica.CFrame = CFrame.new(posicaoFinal)
+                    bolaFisica.Velocity = Vector3.new(999999, 999999, 999999)
+                    bolaFisica.RotVelocity = Vector3.new(999999, 999999, 999999)
 
-                local partesAlvo = {"HumanoidRootPart", "Head", "LowerTorso"}
+                    firetouchinterest(bolaFisica, p, 0)
+                    firetouchinterest(bolaFisica, p, 1)
+                end
 
-                task.spawn(function()
-                        local index = 1
-                        local conexaoFisica
-
-                        conexaoFisica = RunService.Heartbeat:Connect(function()
-                                if not bolaFisica or not bolaFisica.Parent or alvoHum.Health <= 0 or not alvoChar.Parent then
-                                        if conexaoFisica then conexaoFisica:Disconnect() end
-                                        if bolaFisica then bolaFisica:Destroy() end
-                                        return
-                                end
-
-                                -- Força o CanCollide ativo todo frame
-                                bolaFisica.CanCollide = true
-
-                                local nomeParte = partesAlvo[index]
-                                local p = alvoChar:FindFirstChild(nomeParte)
-
-                                if p then
-                                        -- Coleta a velocidade linear real e foca apenas no plano horizontal (X, Z)
-                                        local vReal = p.AssemblyLinearVelocity
-                                        local velocidadePlana = Vector3.new(vReal.X, 0, vReal.Z)
-                                        
-                                        local posicaoFinal = p.Position
-
-                                        -- Só aplica a previsão se o jogador estiver se movendo de fato
-                                        if velocidadePlana.Magnitude > 1 then
-                                                local direcaoMovimento = velocidadePlana.Unit
-                                                local studsDeCompensacao = 0
-
-                                                -- Ponto de corte: WalkSpeed padrão do Roblox modificado (Corte em 18)
-                                                if velocidadePlana.Magnitude <= 18 then
-                                                        -- Alvo andando: Variação de 13 a 15 (Base ideal em 14.2 para cobrir a margem)
-                                                        studsDeCompensacao = 14.2
-                                                else
-                                                        -- Alvo correndo de shirt: Variação de 19 a 21 (Base ideal em 20.2)
-                                                        studsDeCompensacao = 20.2
-                                                end
-
-                                                -- Projeta a posição final exatamente nos studs calculados à frente do movimento do alvo
-                                                posicaoFinal = p.Position + (direcaoMovimento * studsDeCompensacao)
-                                        end
-
-                                        -- Teleporte por CFrame sob a zona de autoridade do Ultra SimulationRadius
-                                        bolaFisica.CFrame = CFrame.new(posicaoFinal)
-
-                                        -- Alimentação constante de vetores massivos para impedir perda de dados na rede
-                                        bolaFisica.Velocity = Vector3.new(999999, 999999, 999999)
-                                        bolaFisica.RotVelocity = Vector3.new(999999, 999999, 999999)
-                                        
-                                        -- Força o "Touch" físico disparando a função nativa de colisão do motor do Roblox
-                                        firetouchinterest(bolaFisica, p, 0)
-                                        firetouchinterest(bolaFisica, p, 1)
-                                end
-
-                                index = index + 1
-                                if index > #partesAlvo then index = 1 end
-                        end)
-                end)
-        end
+                index = index + 1
+                if index > #partesAlvo then index = 1 end
+            end)
+        end)
+    end
 end
 
--- 3. CONEXÃO DE RAYCAST POR TELA
-local mouse = lp:GetMouse()
+-- CRIAÇÃO DO BOTÃO VISUAL DA TOOL
+local actionButton = Instance.new("TextButton")
+actionButton.Name = "FlingBallButton"
+actionButton.Size = UDim2.new(0, 65, 0, 65)
+actionButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+actionButton.BackgroundTransparency = 0
+actionButton.BorderSizePixel = 0
+actionButton.Text = "FLING\nBALL"
+actionButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+actionButton.TextTransparency = 0
+actionButton.Font = Enum.Font.Arcade
+actionButton.TextScaled = true
+actionButton.TextWrapped = true
 
-tool.Activated:Connect(function()
-        local unitRay = camera:ScreenPointToRay(mouse.X, mouse.Y)
+local uiPadding = Instance.new("UIPadding")
+uiPadding.PaddingTop = UDim.new(0.08, 0)
+uiPadding.PaddingBottom = UDim.new(0.08, 0)
+uiPadding.PaddingLeft = UDim.new(0.08, 0)
+uiPadding.PaddingRight = UDim.new(0.08, 0)
+uiPadding.Parent = actionButton
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Color = Color3.fromRGB(255, 255, 255)
+uiStroke.Thickness = 3
+uiStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+uiStroke.LineJoinMode = Enum.LineJoinMode.Miter
+uiStroke.Parent = actionButton
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 2)
+uiCorner.Parent = actionButton
+
+local modoAtaqueAtivo = false
+
+local function desativarModoAtaque()
+    modoAtaqueAtivo = false
+    actionButton.Text = "FLING\nBALL"
+    actionButton.BackgroundTransparency = 0
+    actionButton.TextTransparency = 0
+end
+
+actionButton.MouseButton1Click:Connect(function()
+    -- Se a mochila estiver aberta, ignora o clique de ataque (foco no Drag & Drop)
+    if _G.ScriptAdapter and _G.ScriptAdapter.MainPanel and _G.ScriptAdapter.MainPanel.Visible then
+        return
+    end
+
+    -- Alterna o modo de preparo de ataque na tela principal
+    modoAtaqueAtivo = not modoAtaqueAtivo
+    
+    if modoAtaqueAtivo then
+        actionButton.BackgroundTransparency = 0.45
+        actionButton.TextTransparency = 0.2
+    else
+        desativarModoAtaque()
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed or not modoAtaqueAtivo then return end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        local pos = input.Position
+        local unitRay = camera:ScreenPointToRay(pos.X, pos.Y)
+        
         local raycastParams = RaycastParams.new()
         raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
         raycastParams.FilterDescendantsInstances = {character}
@@ -174,25 +206,42 @@ tool.Activated:Connect(function()
         local raycastResult = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 50000, raycastParams)
 
         if raycastResult and raycastResult.Instance then
-                local hitPart = raycastResult.Instance
-                local model = hitPart:FindFirstAncestorOfClass("Model")
+            local hitPart = raycastResult.Instance
+            local model = hitPart:FindFirstAncestorOfClass("Model")
 
-                if model and model:FindFirstChild("Humanoid") then
-                        local tPlayer = Players:GetPlayerFromCharacter(model)
+            if model and model:FindFirstChild("Humanoid") then
+                local tPlayer = Players:GetPlayerFromCharacter(model)
 
-                        if tPlayer and tPlayer ~= lp then
-                                executarAtaqueLimitado(tPlayer)
-                        end
+                if tPlayer and tPlayer ~= lp then
+                    actionButton.Text = "LANÇAR\nBALL"
+                    executarAtaqueLimitado(tPlayer)
+                    
+                    task.delay(0.5, function()
+                        desativarModoAtaque()
+                    end)
                 end
+            end
         end
+    end
 end)
 
--- Limpeza visual
-RunService.RenderStepped:Connect(function()
-        if tool.Parent == character then
-                local rArm = character:FindFirstChild("Right Upper Arm") or character:FindFirstChild("RightArm")
-                if rArm then
-                        -- Travado
-                end
-        end
-end)
+-- REGISTRO DA TOOL NO ADAPTADOR
+_G.ScriptAdapter = _G.ScriptAdapter or {}
+_G.ScriptAdapter.Queue = _G.ScriptAdapter.Queue or {}
+
+local toolData = {
+    Id = "FlingBall_Tool",
+    ButtonUI = actionButton,
+    OnEquip = function()
+        modoAtaqueAtivo = true
+    end,
+    OnUnequip = function()
+        desativarModoAtaque()
+    end
+}
+
+if _G.ScriptAdapter and _G.ScriptAdapter.RegisterTool then
+    _G.ScriptAdapter:RegisterTool(toolData)
+else
+    table.insert(_G.ScriptAdapter.Queue, toolData)
+end
